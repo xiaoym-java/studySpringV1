@@ -1,23 +1,35 @@
 package core.ioc.impl;
 
+
+import core.exception.BeanDefinitionRegistException;
 import core.ioc.BeanDefinition;
 import core.ioc.BeanDefinitionRegistry;
 import core.ioc.BeanFactory;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
+
+import javax.xml.ws.WebServiceException;
+import java.io.Closeable;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class DefaultBeanFactory implements BeanFactory, BeanDefinitionRegistry {
+public class DefaultBeanFactory implements BeanFactory, BeanDefinitionRegistry, Closeable {
 
-    //存放单例bean的缓存
+    private final Log logger = LogFactory.getLog(DefaultBeanFactory.class);
+
+    //存在beanDefinition的缓存
+    private Map<String,BeanDefinition> beanDefinitionMap= new ConcurrentHashMap<>(256);
+    //存放单例bean实例的缓存
     private Map<String,Object> beanMap = new ConcurrentHashMap<>(256);
 
+    //获取bean实例
     public Object getBean(String name) throws Exception {
-        return null;
+        return this.doGetBean(name);
     }
 
     protected Object doGetBean(String beanName) throws InstantiationException, IllegalAccessException, NoSuchMethodException, InvocationTargetException {
@@ -104,6 +116,8 @@ public class DefaultBeanFactory implements BeanFactory, BeanDefinitionRegistry {
     }
 
 
+
+
     /**
      * 初始化
      * @param bd
@@ -120,18 +134,76 @@ public class DefaultBeanFactory implements BeanFactory, BeanDefinitionRegistry {
     }
 
 
-    @Override
-    public void registerBeanDefinition(String beanName, BeanDefinition beanDefinition) throws Exception {
 
+
+    @Override
+    public void registerBeanDefinition(String beanName, BeanDefinition beanDefinition) throws BeanDefinitionRegistException {
+        Objects.requireNonNull(beanName,"注册bean需要给入beanName");
+        Objects.requireNonNull(beanDefinition,"注册bean需要给入beanDefinition");
+
+        //检验给如的bean是否合法
+        if(!beanDefinition.validata()){
+            throw new BeanDefinitionRegistException(String.format("名字为[%s]的bean的定义不合法：%s",beanName,beanDefinition));
+        }
+
+        //验证beanDefinition已经存在
+        if(this.containBeanDefinition(beanName)){
+            throw new BeanDefinitionRegistException(String.format("名字为[%s]的bean定义已经存在:%s",
+                    beanName,this.getBeanDefinition(beanName)));
+        }
+
+        this.beanDefinitionMap.put(beanName,beanDefinition);
     }
 
+    /**
+     * 获取beanDefinition
+     * @param beanName bean的名称 唯一标识
+     * @return beanDefinition
+     */
     @Override
     public BeanDefinition getBeanDefinition(String beanName) {
-        return null;
+        return this.beanDefinitionMap.get(beanName);
     }
 
+
+    /**
+     * 验证beanDefinition是否已经存在
+     * @param beanName bean的名称 唯一标识
+     * @return true：已存在 false：不存在
+     */
     @Override
     public boolean containBeanDefinition(String beanName) {
-        return false;
+        return this.beanDefinitionMap.containsKey(beanName);
+    }
+
+    /**
+     * 执行指定的销毁方法
+     * @throws WebServiceException
+     */
+    @Override
+    public void close() throws WebServiceException {
+        //执行单例实例的销毁方法
+        for(Map.Entry<String,BeanDefinition> e:this.beanDefinitionMap.entrySet()){
+            String beanName=e.getKey();
+            BeanDefinition bd=e.getValue();
+
+            if(bd.isSingleton() && StringUtils.isNotBlank(bd.getDestroyMethodName())){
+                Object instance = this.beanMap.get(beanName);
+                try {
+                    Method m = instance.getClass().getMethod(bd.getDestroyMethodName());
+                    m.invoke(instance,null);
+                } catch (NoSuchMethodException e1) {
+                    logger.error(String.format("执行bean[%s] %s 的 销毁方法异常！",beanName,bd), e1);
+                    e1.printStackTrace();
+                } catch (IllegalAccessException e1) {
+                    logger.error(String.format("执行bean[%s] %s 的 销毁方法异常！",beanName,bd), e1);
+                    e1.printStackTrace();
+                } catch (InvocationTargetException e1) {
+                    logger.error(String.format("执行bean[%s] %s 的 销毁方法异常！",beanName,bd), e1);
+                    e1.printStackTrace();
+                }
+            }
+        }
+
     }
 }
