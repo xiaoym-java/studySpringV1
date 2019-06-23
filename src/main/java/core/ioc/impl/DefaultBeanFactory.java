@@ -20,7 +20,7 @@ public class DefaultBeanFactory implements BeanFactory, BeanDefinitionRegistry {
         return null;
     }
 
-    protected Object doGetBean(String beanName){
+    protected Object doGetBean(String beanName) throws InstantiationException, IllegalAccessException, NoSuchMethodException, InvocationTargetException {
         //验证bean不能为空
         Objects.requireNonNull(beanName,"beanName不能为空");
 
@@ -38,18 +38,27 @@ public class DefaultBeanFactory implements BeanFactory, BeanDefinitionRegistry {
         if(type!=null){
             if(StringUtils.isBlank(bd.getFactoryMethodName())){
                 //构造方法来构造对象
-                instance =this.c
+                instance =this.createInstanceByConstructor(bd);
             }else{
                 //通过静态工厂方法创建对象
+                instance=this.createInstanceByStaticFactoryMethod(bd);
+
             }
         }else{
             //通过工厂bean方式来构造对象
-
+            instance=this.createInstanceByFactoryBean(bd);
         }
 
 
+        //执行初始化方法，比如说给属性赋值等
+        this.doInit(bd,instance);
 
+        //如果是单例，则将bean实例放入缓存中
+        if(bd.isSingleton()){
+            beanMap.put(beanName,instance);
+        }
 
+        return instance;
     }
 
 
@@ -64,13 +73,51 @@ public class DefaultBeanFactory implements BeanFactory, BeanDefinitionRegistry {
         return bd.getBeanClass().newInstance();
     }
 
+    /**
+     * 通过静态工厂方法创建bean
+     * @param bd bean定义
+     * @return bean 实例
+     * @throws NoSuchMethodException
+     * @throws InvocationTargetException
+     * @throws IllegalAccessException
+     */
     private Object createInstanceByStaticFactoryMethod(BeanDefinition bd) throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
         Class<?> type=bd.getBeanClass();
         Method m=type.getMethod(bd.getFactoryMethodName(),null);
         return m.invoke(type,null);
     }
 
-    private 
+    /**
+     * 通过工厂bean 方式来构造对象
+     * @param bd
+     * @return
+     * @throws InvocationTargetException
+     * @throws IllegalAccessException
+     * @throws NoSuchMethodException
+     */
+    private Object createInstanceByFactoryBean(BeanDefinition bd) throws InvocationTargetException, IllegalAccessException, NoSuchMethodException, InstantiationException {
+        Object factoryBean =this.doGetBean(bd.getFactoryBeanName());
+        Method m=factoryBean.getClass().getMethod(bd.getFactoryMethodName(),null);
+
+        return m.invoke(factoryBean,null);
+
+    }
+
+
+    /**
+     * 初始化
+     * @param bd
+     * @param instance
+     * @throws NoSuchMethodException
+     * @throws InvocationTargetException
+     * @throws IllegalAccessException
+     */
+    private void doInit(BeanDefinition bd,Object instance) throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
+        if(StringUtils.isNotBlank(bd.getInitMehtodName())){
+            Method m=instance.getClass().getMethod(bd.getInitMehtodName(),null);
+            m.invoke(instance,null);
+        }
+    }
 
 
     @Override
